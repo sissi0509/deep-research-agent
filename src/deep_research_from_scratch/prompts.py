@@ -570,3 +570,49 @@ Judgment: FAIL - assumes "modern", "safe", and "good schools" preferences
 <output_instructions>
 Carefully scan the brief for any details not explicitly provided by the user. Be strict - when in doubt about whether something was user-specified, lean toward FAIL.
 </output_instructions>"""
+
+CLARIFICATION_TOPIC_PROMPT = """
+<role>
+You are an expert evaluator of clarifying questions asked by a research assistant.
+</role>
+
+<task>
+Determine whether the assistant's clarifying question asks about one specific topic. Return a binary judgment with reasoning.
+</task>
+
+<user_request>
+{user_request}
+</user_request>
+
+<clarifying_question>
+{question}
+</clarifying_question>
+
+<topic_to_check>
+{topic}
+</topic_to_check>
+
+<evaluation_guidelines>
+COVERED if:
+- The question explicitly asks about the topic
+- The question asks about it in different words (e.g. "price range" covers "budget")
+
+NOT COVERED if:
+- The topic is not asked about at all
+- The topic is only mentioned in passing, without actually asking the user for it
+
+<evaluation_examples>
+Topic: "budget or monthly rent"
+Question: "What price range are you looking at per month?"
+Judgment: COVERED - price range per month is the same as monthly budget
+
+Topic: "number of bedrooms"
+Question: "Which neighborhoods do you prefer, and what's your budget?"
+Judgment: NOT COVERED - bedrooms are never asked about
+</evaluation_examples>
+</evaluation_guidelines>
+
+<output_instructions>
+Quote the part of the question that covers the topic, if any. When in doubt, lean toward NOT COVERED.
+</output_instructions>
+"""
