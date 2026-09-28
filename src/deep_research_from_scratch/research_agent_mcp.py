@@ -52,6 +52,21 @@ def get_mcp_client():
         _client = MultiServerMCPClient(mcp_config)
     return _client
 
+# Cached MCP tools - fetched once on first use
+_mcp_tools = None
+
+async def get_mcp_tools():
+    """Fetch the MCP tool list once, then reuse it.
+
+    Each get_tools() call opens a new session, which relaunches the stdio
+    server process. The filesystem server's tool list never changes, so
+    fetching it on every loop iteration is wasted work.
+    """
+    global _mcp_tools
+    if _mcp_tools is None:
+        _mcp_tools = await get_mcp_client().get_tools()
+    return _mcp_tools
+
 # Initialize models
 compress_model = init_chat_model(model="openai:gpt-4.1", max_tokens=32000)
 model = init_chat_model(model="anthropic:claude-sonnet-4-6")
@@ -68,9 +83,8 @@ async def llm_call(state: ResearcherState):
 
     Returns updated state with model response.
     """
-    # Get available tools from MCP server
-    client = get_mcp_client()
-    mcp_tools = await client.get_tools()
+    # Get available tools from MCP server (cached after the first call)
+    mcp_tools = await get_mcp_tools()
 
     # Use MCP tools for local document access
     tools = mcp_tools + [think_tool]
@@ -102,9 +116,8 @@ async def tool_node(state: ResearcherState):
 
     async def execute_tools():
         """Execute all tool calls. MCP tools require async execution."""
-        # Get fresh tool references from MCP server
-        client = get_mcp_client()
-        mcp_tools = await client.get_tools()
+        # Get tool references from MCP server (cached after the first call)
+        mcp_tools = await get_mcp_tools()
         tools = mcp_tools + [think_tool]
         tools_by_name = {tool.name: tool for tool in tools}
 
@@ -112,12 +125,9 @@ async def tool_node(state: ResearcherState):
         observations = []
         for tool_call in tool_calls:
             tool = tools_by_name[tool_call["name"]]
-            if tool_call["name"] == "think_tool":
-                # think_tool is sync, use regular invoke
-                observation = tool.invoke(tool_call["args"])
-            else:
-                # MCP tools are async, use ainvoke
-                observation = await tool.ainvoke(tool_call["args"])
+            # ainvoke works for every tool: async MCP tools run natively,
+            # sync tools like think_tool run in a background thread
+            observation = await tool.ainvoke(tool_call["args"])
             observations.append(observation)
 
         # Format results as tool messages
@@ -147,7 +157,12 @@ def compress_research(state: ResearcherState) -> dict:
     """
 
     system_message = compress_research_system_prompt.format(date=get_today_str())
-    messages = [SystemMessage(content=system_message)] + state.get("researcher_messages", []) + [HumanMessage(content=compress_research_human_message)]
+    research_topic = state.get("research_topic") or state["researcher_messages"][0].content
+    messages = (
+        [SystemMessage(content=system_message)]
+        + state.get("researcher_messages", [])
+        + [HumanMessage(content=compress_research_human_message.format(research_topic=research_topic))]
+    )
 
     response = compress_model.invoke(messages)
 
